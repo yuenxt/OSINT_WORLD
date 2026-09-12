@@ -18,7 +18,7 @@ jobs:
         working-directory: OSINT_WORLD_ANDROID
 
     steps:
-      - name: Checkout project
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -51,24 +51,36 @@ jobs:
             libffi-dev \
             libssl-dev \
             gettext \
-            autopoint
+            autopoint \
+            libltdl-dev
 
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
-          pip install --upgrade buildozer cython
+          pip install --upgrade setuptools
+          pip install --upgrade buildozer
+          pip install cython==0.29.34
 
-      - name: Enable Android SDK licenses
+      - name: Enable Android SDK license
         run: |
           sed -i 's/^# *android.accept_sdk_license = False/android.accept_sdk_license = True/' buildozer.spec
+
+      - name: Clean Buildozer
+        run: |
+          rm -rf ~/.buildozer
+          rm -rf .buildozer
+
+      - name: Prepare Android SDK
+        run: |
+          mkdir -p ~/.buildozer/android/platform
 
       - name: Build APK
         run: |
           buildozer -v android debug
 
-      - name: Find APK
+      - name: Show APK
         run: |
-          echo "Найденные APK:"
+          echo "APK files:"
           find bin -type f -name "*.apk" -print
 
       - name: Upload APK
