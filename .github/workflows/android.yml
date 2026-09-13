@@ -5,9 +5,6 @@ on:
   push:
     branches: [main]
 
-env:
-  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: "0"
-
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -32,43 +29,106 @@ jobs:
           distribution: temurin
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
 
-      - name: Install Android SDK packages
+      - name: Prepare Android SDK for Buildozer
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"
+          set -euxo pipefail
 
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "SDK=$SDK"
 
-          # Current Buildozer expects sdkmanager at tools/bin/sdkmanager.
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-31" \
+            "build-tools;33.0.2"
+
+          # Buildozer expects the old tools/bin/sdkmanager location.
           mkdir -p "$SDK/tools/bin"
-          ln -sf "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"
+          ln -sf "$(command -v sdkmanager)" "$SDK/tools/bin/sdkmanager"
 
-          # Show the exact AIDL that Buildozer will use.
-          test -x "$SDK/build-tools/35.0.0/aidl"
-          "$SDK/build-tools/35.0.0/aidl" 2>&1 || true
+          # Verify AIDL exists where Buildozer checks it.
+          test -x "$SDK/build-tools/33.0.2/aidl"
+          "$SDK/build-tools/33.0.2/aidl" || test $? -eq 1
 
-          echo "APP_ANDROID_SDK_PATH=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROIDSDK=$SDK" >> "$GITHUB_ENV"
+          # IMPORTANT: tell Buildozer to use this SDK.
+          python - <<'PY'
+          from pathlib import Path
+          import os, re
+
+          p = Path("buildozer.spec")
+          text = p.read_text(encoding="utf-8")
+          sdk = os.environ.get("ANDROID_SDK_ROOT") or os.environ["ANDROID_HOME"]
+
+          if re.search(r"(?m)^android\.sdk_path\s*=", text):
+              text = re.sub(
+                  r"(?m)^android\.sdk_path\s*=.*$",
+                  "android.sdk_path = " + sdk,
+                  text,
+              )
+          elif re.search(r"(?m)^#\s*android\.sdk_path\s*=", text):
+              text = re.sub(
+                  r"(?m)^#\s*android\.sdk_path\s*=.*$",
+                  "android.sdk_path = " + sdk,
+                  text,
+              )
+          else:
+              marker = "[app]"
+              text = text.replace(
+                  marker,
+                  marker + "\nandroid.sdk_path = " + sdk,
+                  1,
+              )
+
+          text = re.sub(
+              r"(?m)^#\s*android\.accept_sdk_license\s*=.*$",
+              "android.accept_sdk_license = True",
+              text,
+          )
+          if not re.search(r"(?m)^android\.accept_sdk_license\s*=", text):
+              text = text.replace(
+                  "[app]",
+                  "[app]\nandroid.accept_sdk_license = True",
+                  1,
+              )
+
+          # Use the maintained p4a branch if the spec has the old setting.
+          text = re.sub(
+              r"(?m)^#\s*p4a\.branch\s*=\s*master\s*$",
+              "p4a.branch = develop",
+              text,
+          )
+
+          p.write_text(text, encoding="utf-8")
+          print("Using SDK:", sdk)
+          print("buildozer.spec updated")
+          PY
+
+          grep -E "^(android\.sdk_path|android\.accept_sdk_license|p4a\.branch)" buildozer.spec
 
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y automake libltdl-dev
+          sudo apt-get install -y \
+            automake \
+            libltdl-dev \
+            build-essential \
+            libstdc++6 \
+            aidl
 
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade buildozer
 
-      - name: Prepare Buildozer
+      - name: Clean old Buildozer cache
         run: |
-          sed -i 's/^# *android.accept_sdk_license = False/android.accept_sdk_license = True/' buildozer.spec || true
-          sed -i 's/^# *p4a.branch = master/p4a.branch = develop/' buildozer.spec || true
           rm -rf .buildozer
-          buildozer android p4a -- --help
+          rm -rf ~/.buildozer
 
       - name: Build APK
         run: |
