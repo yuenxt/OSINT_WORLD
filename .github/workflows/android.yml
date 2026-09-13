@@ -3,8 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 env:
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: "0"
@@ -24,13 +23,35 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
           java-version: "17"
-          distribution: "temurin"
+          distribution: temurin
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"
+
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+
+          # Current Buildozer expects sdkmanager at tools/bin/sdkmanager.
+          mkdir -p "$SDK/tools/bin"
+          ln -sf "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"
+
+          # Show the exact AIDL that Buildozer will use.
+          test -x "$SDK/build-tools/35.0.0/aidl"
+          "$SDK/build-tools/35.0.0/aidl" 2>&1 || true
+
+          echo "APP_ANDROID_SDK_PATH=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROIDSDK=$SDK" >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
         run: |
@@ -42,19 +63,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade buildozer
 
-      - name: Prepare Buildozer / Android SDK
+      - name: Prepare Buildozer
         run: |
           sed -i 's/^# *android.accept_sdk_license = False/android.accept_sdk_license = True/' buildozer.spec || true
           sed -i 's/^# *p4a.branch = master/p4a.branch = develop/' buildozer.spec || true
-          rm -rf ~/.buildozer
           rm -rf .buildozer
           buildozer android p4a -- --help
 
       - name: Build APK
-        run: buildozer -v android debug
+        run: |
+          buildozer -v android debug
 
-      - name: Find APK
-        run: find bin -type f -name "*.apk" -print
+      - name: Show APK
+        run: |
+          find bin -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
