@@ -35,30 +35,26 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            automake \
-            libltdl-dev
+          sudo apt-get install -y automake libltdl-dev
 
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade buildozer
 
-      - name: Prepare Android SDK and NDK
+      - name: Prepare Buildozer / Android SDK
         run: |
-          sed -i 's/^# *android.accept_sdk_license = False/android.accept_sdk_license = True/' buildozer.spec
-          sed -i 's/^# *p4a.branch = master/p4a.branch = develop/' buildozer.spec
+          sed -i 's/^# *android.accept_sdk_license = False/android.accept_sdk_license = True/' buildozer.spec || true
+          sed -i 's/^# *p4a.branch = master/p4a.branch = develop/' buildozer.spec || true
           rm -rf ~/.buildozer
           rm -rf .buildozer
           buildozer android p4a -- --help
 
       - name: Build APK
-        run: |
-          buildozer -v android debug
+        run: buildozer -v android debug
 
-      - name: Show APK
-        run: |
-          find bin -type f -name "*.apk" -print
+      - name: Find APK
+        run: find bin -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
